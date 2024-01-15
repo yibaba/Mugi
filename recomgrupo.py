@@ -1,13 +1,13 @@
 import requests
 #from rich.progress import track
-#from rich.console import Console
-#from rich.table import Table
+from rich.console import Console
+from rich.table import Table
 import time
 from numbers import Number
 import json
 import pickle
 import sys
-from typing import Any, Callable, Iterable, Iterator, TypeVar, cast
+from typing import Any, Callable, Iterator, TypeVar
 #import fnmatch
 import re
 
@@ -75,6 +75,7 @@ token = tokenBearer()
 def refrescar_token_si_necesario() -> None:
     global token
     if token.token == "" or timestamp_caducada(token):
+        getcredentials()
         print("Obteniendo token")
         time.sleep(cooloff)
         peticion_token = requests.put(
@@ -110,7 +111,6 @@ def hacer_peticion_get(url: str) -> requests.Response:
     hdr = getheader()
     return requests.get(url=url, headers=hdr)
 
-
 def hacer_peticion_post(url: str, cont: str) -> requests.Response:
     global cooloff
     time.sleep(cooloff)
@@ -129,21 +129,20 @@ def comprobar_si_toca_pedir(enlace: str) -> bool:
 
 def limpiar_url_de_peticiones(url: str) -> None:
     print(f"limpiando url: \n\t {url}")
-    algo_borrado_flag = True
+    algo_borrado: bool = False
     for peticion in peticiones:
         if peticion.linkapi == url:
             peticiones.remove(peticion)
-            algo_borrado_flag = False
-    if algo_borrado_flag:
-        print("fallo al limpiar la siguiente url linkapi:")
-        print(f"\t{url}")
-        sys.exit(31)
+            algo_borrado = True
+    if not algo_borrado:
+        print("Aviso: no se ha borrado nada")
+        print(f"url analizada:\n\t{url}")
 
 def rellenar_tabla_ids_leidos_si_necesario() -> None:
     global peticiones
     url: str = "https://api.mangaupdates.com/v1/lists/0/search"
     if comprobar_si_toca_pedir(url):
-        print("tabla ids leidos encontrada")
+        print("tabla ids leidos no encontrada")
         longitud: dict[str, int] = {"page": 1,
          "perpage": 1000}
         cont: str = json.dumps(longitud)
@@ -169,33 +168,57 @@ def lista_peticiones_a_iterator_de_propiedad(lista:list[peticiontempeada], propi
         yield valor_propiedad
 
 def iterador_tabla_ids_ponderados_m1() -> Iterator[tuple[int, float]]:
-    # https://api\.mangaupdates\.com/v1/lists/\d+/search$
     lista_filtrada: list[peticiontempeada]|None = devolver_lista_ocurrencias_por_linkapi(
         r"^https://api\.mangaupdates\.com/v1/lists/\d+/search$")
+    #consigue bien la lista filtrada
     if lista_filtrada is None:
         print("no se encuentra tal ocurrencia") 
         print("fallo al construir la lista de ids ponderados m1")
         sys.exit(13)
     lista_filtrada_iterable:Iterator[str] = lista_peticiones_a_iterator_de_propiedad(
         lista=lista_filtrada,
-        propiedad="linkapi")
+        propiedad="stringjson")
     for cadenajson in lista_filtrada_iterable:
-        diccionario_bucle = json.loads(cadenajson)
-        rating = diccionario_bucle["metadata"]["series"]["bayesian_rating"]
-        rating = rating if isinstance(rating, Number) else 0
-        id_serie = diccionario_bucle["record"]["series"]["id"]
-        progreso = diccionario_bucle["metadata"]["series"]["latest_chapter"] / diccionario_bucle["record"]["status"]["chapter"]
-        # print(f"añadiendo id {elid}")
-        yield (id_serie, rating*progreso)
+        #print(f"cadenajson:\n\t{cadenajson}")
+        diccionario_bucle = json.loads(cadenajson)["results"]
+        for dict_serie in diccionario_bucle:
+            rating = dict_serie["metadata"]["series"]["bayesian_rating"]
+            rating = rating if isinstance(rating, Number) else 0
+            id_serie = dict_serie["record"]["series"]["id"]
+            progreso = dict_serie["record"]["status"]["chapter"] / dict_serie["metadata"]["series"]["latest_chapter"]
+            # print(f"añadiendo id {elid}")
+            yield (id_serie, rating*progreso)
 
-# Dividir en tres, el que hace la petición, el iterador y el orquestrador que escupe la lista ordenada
+
+def grupos_serie_por_id(id: int) -> set[tuple[int, str]]:
+    lista_recomendados: list[peticiontempeada]|None = devolver_lista_ocurrencias_por_linkapi(
+        f"^https://api.mangaupdates.com/v1/series/{id}/groups$")
+    if lista_recomendados is None:
+        print("no se encuentra tal ocurrencia")
+        print("fallo al construir lista_recomendados")
+        sys.exit(12)
+    lista_recomendados_iterable: Iterator[str] = lista_peticiones_a_iterator_de_propiedad(
+        lista=lista_recomendados,
+        propiedad="stringjson")
+    conjunto_resultado: set[tuple[int, str]] = set()
+    for cadenajson in lista_recomendados_iterable:
+        diccionario_bucle = json.loads(cadenajson)["group_list"]
+        for diccionario_grupo in diccionario_bucle:
+            id_grupo = diccionario_grupo["group_id"]
+            nombre = diccionario_grupo["name"]
+            conjunto_resultado.add((id_grupo, nombre))
+    return conjunto_resultado
+
+def ordenar_listatuplas(lista_tuplas: list[tuple[int, str, float]]) -> list[tuple[int, str, float]]:
+    newlist = sorted(lista_tuplas, key=lambda x: x[2], reverse=True)
+    return newlist
+
+# Bastante guarra, dividir en dos
 def tabla_ids_recomendados_segun_iterador_ponderador(
-        funcion_ponderación: Callable[..., Iterator[tuple[int, float]]]) -> set[tuple[str, int, float]]:
-
-    workingset: set[int] = set()
-    repetidos: list[int] = []
-    conjunto_series: set[tuple[str, int, float]]
-    for tupla in funcion_ponderación():
+        funcion_ponderacion: Callable[..., Iterator[tuple[int, float]]]) -> list[tuple[int, str, float]]:
+    
+    dict_total_grupos: dict[int, tuple[str, float]] = {}
+    for tupla in funcion_ponderacion():
         id_serie, puntos = tupla
         url = f"https://api.mangaupdates.com/v1/series/{id_serie}/groups"
         if comprobar_si_toca_pedir(url):
@@ -205,184 +228,55 @@ def tabla_ids_recomendados_segun_iterador_ponderador(
             else:
                 print("error petición series id")
                 sys.exit(peticion.status_code)
-
-
-if __name__ == "__main__":
-    #leer_peticiones()
-    # tanto monta
-    getcredentials()
-    rellenar_tabla_ids_leidos_si_necesario()
-    print(peticiones)
-    # monta tanto
-    escribir_peticiones()
-    sys.exit(0)
-"""
-tCadRecs = 60*60
-thrTime = 0.3
-credentials = {}
-
-
-def getcredentials():
-    credentials.setdefault("username", input("Usuario: "))
-    credentials.setdefault("password", input("Contraseña: "))
-
-
-class tokenobj:
-    def __init__(self):
-        self.token = ""
-        self.timestamp = 0.0
-
-
-class idtable:
-    def __init__(self):
-        self.dic = {}
-        self.timestamp = 0.0
-
-
-def getheader():
-    tokenacq()
-    secreto = f"Bearer {token.token}"
-    return {"Authorization": secreto,
-            "Content-Type": "application/json"}
-
-
-token = tokenobj()
-losids = idtable()
-recids = idtable()
-# recargar objeto token
-
-
-def tokenacq():
-    if token.token == "" or time.time()-token.timestamp >= 3500:
-        print("Obteniendo token")
-        time.sleep(thrTime)
-        locreq = requests.put(
-            "https://api.mangaupdates.com/v1/account/login", data=credentials)
-        if locreq.ok:
-            token.timestamp = time.time()
-            token.token = locreq.json()["context"]["session_token"]
-        else:
-            print("error al conseguir el token")
-
-
-def idstable():
-    if not losids.dic or time.time()-losids.timestamp >= tCadRecs:
-        hdr = getheader()
-        cont = {"page": 1,
-                "perpage": 1000}
-        cont = json.dumps(cont)
-        url = "https://api.mangaupdates.com/v1/lists/0/search"
-        time.sleep(thrTime)
-        lstallentpy = requests.post(
-            url=url, data=cont, headers=hdr)
-        if lstallentpy.ok:
-            print("obteniendo lista")
-            for dicto in track(lstallentpy.json()["results"],
-                               description="Trabajando..."):
-                rat = dicto["metadata"]["series"]["bayesian_rating"]
-                rat = rat if isinstance(rat, numbers.Number) else 0
-                elid = dicto["record"]["series"]["id"]
-                progr = dicto["metadata"]["series"]["latest_chapter"] / dicto["record"]["status"]["chapter"]
-                # print(f"añadiendo id {elid}")
-                # losids.dic.setdefault(elid, rat*progr)
-                if elid in losids.dic.keys():
-                    losids.dic[elid] = rat*progr
-                else:
-                    losids.dic.setdefault(elid, rat*progr)
-        else:
-            print("error al conseguir la lista")
-            print(f"hdr {hdr}")
-            print(f"content {lstallentpy.content}")
-        print("actualizando tiempos")
-        losids.timestamp = time.time()
-
-
-def rectable():
-    if not recids.dic or time.time()-recids.timestamp >= tCadRecs:
-        for llave in track(losids.dic.keys(), description="Procesando..."):
-            url = f"https://api.mangaupdates.com/v1/series/{llave}/groups"
-            hdr = getheader()
-            time.sleep(thrTime)
-            lreq = requests.get(url=url, headers=hdr)
-            print("OtL")
-            if lreq.ok:
-                for serreq in lreq.json()["group_list"]:
-                    miid = serreq["name"]
-                    print("InL")
-                    peso = losids.dic[llave]
-                    # print(f"procesando {miid}")
-                    if miid in recids.dic.keys():
-                        recids.dic[miid] += peso
-                    else:
-                        recids.dic.setdefault(miid, peso)
+        conjunto_parcial_grupos: set[tuple[int, str]] = grupos_serie_por_id(
+            id=id_serie)
+        for grupo_id, nombre_grupo in conjunto_parcial_grupos:
+            if grupo_id in dict_total_grupos.keys():
+                nombre, a_puntos = dict_total_grupos[grupo_id]
+                dict_total_grupos[grupo_id] = (nombre, a_puntos+puntos)
             else:
-                print("error al conseguir la reclista")
-        print("actualizando tiempos")
-        recids.timestamp = time.time()
+                dict_total_grupos.setdefault(grupo_id, (nombre_grupo, puntos))
+    lista_total_grupos: list[tuple[int, str, float]] = []
+    for grupo_id in dict_total_grupos.keys():
+        nombre, peso = dict_total_grupos[grupo_id]
+        tupla_a_sumar: tuple[int, str, float] = (grupo_id, nombre, peso)
+        lista_total_grupos.append(tupla_a_sumar)
+    lista_total_grupos = ordenar_listatuplas(lista_total_grupos)
+    return lista_total_grupos
 
-
-def logout():
-    hdr = getheader()
-    _ = requests.post(
-        "https://api.mangaupdates.com/v1/account/logout", headers=hdr)
-
-
-def orderdict(dic):
-    newtup = sorted(dic.items(), key=lambda x: x[1], reverse=True)
-    newdic = dict(newtup)
-    return newdic
-
-
-def getdatatops(numb):
-    tabla = Table(title="Más Recomendadas")
-    tabla.add_column("Nombre")
-    tabla.add_column("Peso")
-    for elid in track(recids.dic.keys(), description="Ensamblando..."):
-        if numb > 0:
-            titulo = str(elid)
-            peso = str(recids.dic[elid])
-            tabla.add_row(titulo, peso)
-            numb -= 1
+def iterador_top_grupos(f_grupos: Callable[..., list[tuple[int, str, float]]], num:int) -> Iterator[tuple[int, str, float]]:
+    grupos_totales: list[tuple[int, str, float]] = f_grupos(
+            funcion_ponderacion=iterador_tabla_ids_ponderados_m1
+    )
+    for tupla in grupos_totales:
+        if num < 0:
+            num -=1
+            yield tupla
         else:
             pass
+
+def escupir_tabla_gid_nombre_peso(it_grupos:Callable[..., Iterator[tuple[int, str, float]]], num:int) -> Any:
+    tabla = Table(title="Más Recomendados")
+    tabla.add_column("Nombre")
+    tabla.add_column("Id")
+    tabla.add_column("Peso")
+    for grupo_id, nombre, peso in it_grupos(
+        f_grupos=tabla_ids_recomendados_segun_iterador_ponderador,
+        num=num
+    ):
+        idgrupo = str(grupo_id)
+        puntos = str(peso)
+        tabla.add_row(nombre, idgrupo, puntos)
     console = Console()
     console.print(tabla)
 
-
-def loadids():
-    with open("losids", "rb") as losids_f:
-        global losids
-        tlosids = pickle.load(losids_f)
-        if tlosids != 0:
-            print("Exito cargando ids")
-            losids = tlosids
-    with open("grids", "rb") as recids_f:
-        global recids
-        trecids = pickle.load(recids_f)
-        if trecids != 0:
-            print("Exito cargando recids")
-            recids = trecids
-
-
-def dumpids():
-    with open("losids", "wb") as losids_f:
-        pickle.dump(losids, losids_f)
-    with open("grids", "wb") as recids_f:
-        pickle.dump(recids, recids_f)
-
-
 if __name__ == "__main__":
-    #loadids()
-    print(time.gmtime(losids.timestamp))
-    print(time.gmtime(recids.timestamp))
-    print(time.gmtime(time.time()))
-    # sys.exit(1)
-    getcredentials()
-    idstable()
-    rectable()
-    recids.dic = orderdict(recids.dic)
-    getdatatops(int(input(f"Numero de resultados de {len(recids.dic)}: ")))
-    logout()
-    dumpids()
-    exit(0)
-"""
+    leer_peticiones()
+    # tanto monta
+    rellenar_tabla_ids_leidos_si_necesario()
+    #print(peticiones)
+    numero = int(input("Numero de Resultados: "))
+    escupir_tabla_gid_nombre_peso(it_grupos=iterador_top_grupos, num=numero)
+    # monta tanto
+    escribir_peticiones()
+    sys.exit(0)
