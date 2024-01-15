@@ -17,7 +17,7 @@ class tokenBearer:
     def __init__(self) -> None:
         self.token: str = ""
         self.timestamp: float = time.time()
-        self.caducidad: int = 60*60
+        self.caducidad: int = 9*60
 
 class credenciales:
     def __init__(self) -> None:
@@ -83,6 +83,9 @@ def refrescar_token_si_necesario() -> None:
         if peticion_token.ok:
             token.timestamp = time.time()
             token.token = peticion_token.json()["context"]["session_token"]
+            cachear_peticion(
+                peticion=peticion_token,
+                url="https://api.mangaupdates.com/v1/account/login")
         else:
             statcode = f"Código de estatus: {peticion_token.status_code}"
             print("error al conseguir el token")
@@ -104,6 +107,7 @@ def cachear_peticion(peticion:requests.Response, url:str) -> None:
     listado.linkapi = url
     listado.stringjson = peticion.text
     peticiones.append(listado)
+    escribir_peticiones()
 
 def hacer_peticion_get(url: str) -> requests.Response:
     global cooloff
