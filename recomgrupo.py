@@ -7,11 +7,11 @@ from numbers import Number
 import json
 import pickle
 import sys
-from typing import Any, Callable, Iterator, TypeVar
+from typing import Any, Callable, Iterator, TypeVar, cast
 #import fnmatch
 import re
 
-cooloff: float = 0.3
+cooloff: float = 0.5
 
 class tokenBearer:
     def __init__(self) -> None:
@@ -186,10 +186,21 @@ def iterador_tabla_ids_ponderados_m1() -> Iterator[tuple[int, float]]:
         #print(f"cadenajson:\n\t{cadenajson}")
         diccionario_bucle = json.loads(cadenajson)["results"]
         for dict_serie in diccionario_bucle:
-            rating = dict_serie["metadata"]["series"]["bayesian_rating"]
-            rating = rating if isinstance(rating, Number) else 0
-            id_serie = dict_serie["record"]["series"]["id"]
-            progreso = dict_serie["record"]["status"]["chapter"] / dict_serie["metadata"]["series"]["latest_chapter"]
+            rat = dict_serie["metadata"]["series"]["bayesian_rating"]
+            rat = rat if isinstance(rat, Number) else 0.0
+            assert isinstance(rat, Number)
+            rating = cast(float, rat)
+            rating:float = float(rating)
+            id_serie: int = dict_serie["record"]["series"]["id"]
+            leidos = dict_serie["record"]["status"]["chapter"]
+            leidos = leidos if isinstance(leidos, Number) else 1
+            totales = dict_serie["metadata"]["series"]["latest_chapter"]
+            totales = totales if isinstance(totales, Number) else leidos
+            totales = totales if not totales==0 else 1
+            assert isinstance(rating, float)
+            assert isinstance(leidos, int)
+            assert isinstance(totales, int)
+            progreso: float = leidos / totales
             # print(f"añadiendo id {elid}")
             yield (id_serie, rating*progreso)
 
@@ -253,7 +264,7 @@ def iterador_top_grupos(f_grupos: Callable[..., list[tuple[int, str, float]]], n
             funcion_ponderacion=iterador_tabla_ids_ponderados_m1
     )
     for tupla in grupos_totales:
-        if num < 0:
+        if num > 0:
             num -=1
             yield tupla
         else:
