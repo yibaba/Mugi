@@ -10,6 +10,7 @@ import sys
 from typing import Any, Callable, Iterator, Type, TypeAlias, TypeVar, cast
 #import fnmatch
 import re
+from random import randint
 
 cooloff: float = 0.5
 
@@ -35,7 +36,7 @@ class peticiontempeada:
         self.linkapi: str = ""
         self.stringjson: str  = "{}"
         self.timestamp: float = time.time()
-        self.caducidad: int = 12*60*60
+        self.caducidad: int = (12*60*60)+randint(1, 120)
 
 peticiones: list[peticiontempeada] = []
 
@@ -145,7 +146,6 @@ def limpiar_url_de_peticiones(url: str) -> None:
         print(f"url analizada:\n\t{url}")
 
 def rellenar_tabla_ids_leidos_si_necesario() -> None:
-    global peticiones
     url: str = "https://api.mangaupdates.com/v1/lists/0/search"
     if comprobar_si_toca_pedir(url):
         print("tabla ids leidos no encontrada")
@@ -173,7 +173,7 @@ def lista_peticiones_a_iterator_de_propiedad(lista:list[peticiontempeada], propi
         valor_propiedad = getattr(peticion, propiedad)
         yield valor_propiedad
 
-def iterador_tabla_ids_ponderados_m1() -> Iterator[tuple[int, float]]:
+def iterador_cadena_json_listas() -> Iterator[str]:
     rellenar_tabla_ids_leidos_si_necesario()
     lista_filtrada: list[peticiontempeada]|None = devolver_lista_ocurrencias_por_linkapi(
         r"^https://api\.mangaupdates\.com/v1/lists/\d+/search$")
@@ -182,9 +182,14 @@ def iterador_tabla_ids_ponderados_m1() -> Iterator[tuple[int, float]]:
         print("no se encuentra tal ocurrencia") 
         print("fallo al construir la lista de ids ponderados m1")
         sys.exit(13)
-    lista_filtrada_iterable:Iterator[str] = lista_peticiones_a_iterator_de_propiedad(
+    return lista_peticiones_a_iterator_de_propiedad(
         lista=lista_filtrada,
         propiedad="stringjson")
+
+
+IdNamePeso: TypeAlias = tuple[int,str,float]
+def iterador_tabla_ids_ponderados_m1() -> Iterator[IdNamePeso]:
+    lista_filtrada_iterable:Iterator[str] = iterador_cadena_json_listas()
     for cadenajson in lista_filtrada_iterable:
         #print(f"cadenajson:\n\t{cadenajson}")
         diccionario_bucle = json.loads(cadenajson)["results"]
@@ -192,23 +197,33 @@ def iterador_tabla_ids_ponderados_m1() -> Iterator[tuple[int, float]]:
             rat = dict_serie["metadata"]["series"]["bayesian_rating"]
             rat = rat if isinstance(rat, Number) else 0.0
             assert isinstance(rat, Number)
-            rating = cast(float, rat)
-            rating:float = float(rating)
+            rating = float(cast(float, rat))
             id_serie: int = dict_serie["record"]["series"]["id"]
             leidos = dict_serie["record"]["status"]["chapter"]
             leidos = leidos if isinstance(leidos, Number) else 1
             totales = dict_serie["metadata"]["series"]["latest_chapter"]
             totales = totales if isinstance(totales, Number) else leidos
             totales = totales if not totales==0 else 1
+            nombre = dict_serie["record"]["series"]["title"]
             assert isinstance(rating, float)
             assert isinstance(leidos, int)
             assert isinstance(totales, int)
             progreso: float = leidos / totales
             # print(f"añadiendo id {elid}")
-            yield (id_serie, rating*progreso)
+            yield (id_serie, nombre, rating*progreso)
 
+def rellenar_grupos_de_id_si_necesario(id_serie: int) -> None:
+    url = f"https://api.mangaupdates.com/v1/series/{id_serie}/groups"
+    if comprobar_si_toca_pedir(url):
+        peticion = hacer_peticion_get(url=url)
+        if peticion.ok:
+            cachear_peticion(peticion=peticion, url=url)
+        else:
+            print("error petición series id")
+            sys.exit(peticion.status_code)
 
 def grupos_serie_por_id(id: int) -> set[tuple[int, str]]:
+    rellenar_grupos_de_id_si_necesario(id_serie=id)
     lista_recomendados: list[peticiontempeada]|None = devolver_lista_ocurrencias_por_linkapi(
         f"^https://api.mangaupdates.com/v1/series/{id}/groups$")
     if lista_recomendados is None:
@@ -227,26 +242,14 @@ def grupos_serie_por_id(id: int) -> set[tuple[int, str]]:
             conjunto_resultado.add((id_grupo, nombre))
     return conjunto_resultado
 
-IdNamePeso: TypeAlias = tuple[int,str,float]
 def ordenar_listatuplas(lista_tuplas: list[IdNamePeso]) -> list[IdNamePeso]:
     newlist = sorted(lista_tuplas, key=lambda x: x[2], reverse=True)
     return newlist
 
-# Bastante guarra, dividir en dos
-def tabla_ids_recomendados_segun_iterador_ponderador(
-        funcion_ponderacion: Callable[..., Iterator[tuple[int, float]]]) -> list[IdNamePeso]:
-    
+def tabla_GidNP_recomendados() -> list[IdNamePeso]:
     dict_total_grupos: dict[int, tuple[str, float]] = {}
-    for tupla in funcion_ponderacion():
-        id_serie, puntos = tupla
-        url = f"https://api.mangaupdates.com/v1/series/{id_serie}/groups"
-        if comprobar_si_toca_pedir(url):
-            peticion = hacer_peticion_get(url=url)
-            if peticion.ok:
-                cachear_peticion(peticion=peticion, url=url)
-            else:
-                print("error petición series id")
-                sys.exit(peticion.status_code)
+    for tupla in iterador_tabla_ids_ponderados_m1():
+        id_serie, nombre, puntos = tupla
         conjunto_parcial_grupos: set[tuple[int, str]] = grupos_serie_por_id(
             id=id_serie)
         for grupo_id, nombre_grupo in conjunto_parcial_grupos:
@@ -263,24 +266,29 @@ def tabla_ids_recomendados_segun_iterador_ponderador(
     lista_total_grupos = ordenar_listatuplas(lista_total_grupos)
     return lista_total_grupos
 
+
+def iterador_series_por_grupo(grupo_id:int) -> Iterator[IdNamePeso]:
+    for tupla in iterador_tabla_ids_ponderados_m1():
+        id_serie, nombre, puntos = tupla
+        conjunto_parcial_grupos: set[tuple[int, str]] = grupos_serie_por_id(
+            id=id_serie)
+        for gid, _ in conjunto_parcial_grupos:
+            if gid==grupo_id:
+                yield (id_serie, nombre, puntos)
+
+
 def iterador_top_grupos(f_grupos: Callable[..., list[IdNamePeso]], num:int) -> Iterator[IdNamePeso]:
-    grupos_totales: list[tuple[int, str, float]] = f_grupos(
-            funcion_ponderacion=iterador_tabla_ids_ponderados_m1
-    )
-    for tupla in grupos_totales:
-        if num > 0:
-            num -=1
-            yield tupla
-        else:
-            pass
+    grupos_totales: list[tuple[int, str, float]] = f_grupos()
+    for tupla in grupos_totales[:num]:
+        yield tupla
 
 def opcion_top_grupos(num:int) -> Iterator[IdNamePeso]:
     return iterador_top_grupos(
-        f_grupos=tabla_ids_recomendados_segun_iterador_ponderador,
+        f_grupos=tabla_GidNP_recomendados,
         num=num)
 
 def opcion_blame_grupo(gid:int) -> Iterator[IdNamePeso]:
-    return TODO()
+    return iterador_series_por_grupo(grupo_id=gid)
 
 def escupir_tabla_gid_nombre_peso(
         it_IdNP: Iterator[IdNamePeso],
@@ -299,7 +307,7 @@ def escupir_tabla_gid_nombre_peso(
 def imprimir_opciones() -> None:
     print("Elegir de entre las opciones:")
     print("\t1. Imprimir grupos más recomendados")
-    print("\tTODO: Porqué un grupo")
+    print("\t2. Porqué un grupo")
     print("\n\t99. Salir")
 
 def elegir_entre_opciones() -> None:
@@ -316,11 +324,14 @@ def elegir_entre_opciones() -> None:
                 tupla_de_columnas=("Nombre", "Id", "Peso"))
         case 2:
             grupo_id:int = int(input("Id del grupo a analizar: "))
-            iterador:Iterator[IdNamePeso] = opcion_blame_grupo(gid=grupo_id)
+            iterador2:Iterator[IdNamePeso] = opcion_blame_grupo(
+                gid=grupo_id)
             escupir_tabla_gid_nombre_peso(
-                it_IdNP=iterador,
+                it_IdNP=iterador2,
                 titulo_tabla="Series Causantes",
                 tupla_de_columnas=("Nombre", "Id", "Peso"))
+        case 99:
+            sys.exit(0)
         case _:
             elegir_entre_opciones()
 
