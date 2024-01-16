@@ -7,7 +7,7 @@ from numbers import Number
 import json
 import pickle
 import sys
-from typing import Any, Callable, Iterator, TypeVar, cast
+from typing import Any, Callable, Iterator, Type, TypeAlias, TypeVar, cast
 #import fnmatch
 import re
 
@@ -35,7 +35,7 @@ class peticiontempeada:
         self.linkapi: str = ""
         self.stringjson: str  = "{}"
         self.timestamp: float = time.time()
-        self.caducidad: int = 60*60
+        self.caducidad: int = 12*60*60
 
 peticiones: list[peticiontempeada] = []
 
@@ -101,11 +101,13 @@ def getheader() -> dict[str, str]:
 
 
 
-def cachear_peticion(peticion:requests.Response, url:str) -> None:
+def cachear_peticion(peticion:requests.Response, url:str, caducidad:int=-1) -> None:
     limpiar_url_de_peticiones(url=url)
     listado = peticiontempeada()
     listado.linkapi = url
     listado.stringjson = peticion.text
+    if caducidad!=-1:
+        listado.caducidad = caducidad
     peticiones.append(listado)
     escribir_peticiones()
 
@@ -152,7 +154,7 @@ def rellenar_tabla_ids_leidos_si_necesario() -> None:
         cont: str = json.dumps(longitud)
         peticion: requests.Response = hacer_peticion_post(url=url, cont=cont)
         if peticion.ok:
-            cachear_peticion(peticion=peticion, url=url)
+            cachear_peticion(peticion=peticion, url=url, caducidad=-1)
         else:
             print("error petición tabla ids")
             sys.exit(peticion.status_code)
@@ -172,6 +174,7 @@ def lista_peticiones_a_iterator_de_propiedad(lista:list[peticiontempeada], propi
         yield valor_propiedad
 
 def iterador_tabla_ids_ponderados_m1() -> Iterator[tuple[int, float]]:
+    rellenar_tabla_ids_leidos_si_necesario()
     lista_filtrada: list[peticiontempeada]|None = devolver_lista_ocurrencias_por_linkapi(
         r"^https://api\.mangaupdates\.com/v1/lists/\d+/search$")
     #consigue bien la lista filtrada
@@ -224,13 +227,14 @@ def grupos_serie_por_id(id: int) -> set[tuple[int, str]]:
             conjunto_resultado.add((id_grupo, nombre))
     return conjunto_resultado
 
-def ordenar_listatuplas(lista_tuplas: list[tuple[int, str, float]]) -> list[tuple[int, str, float]]:
+IdNamePeso: TypeAlias = tuple[int,str,float]
+def ordenar_listatuplas(lista_tuplas: list[IdNamePeso]) -> list[IdNamePeso]:
     newlist = sorted(lista_tuplas, key=lambda x: x[2], reverse=True)
     return newlist
 
 # Bastante guarra, dividir en dos
 def tabla_ids_recomendados_segun_iterador_ponderador(
-        funcion_ponderacion: Callable[..., Iterator[tuple[int, float]]]) -> list[tuple[int, str, float]]:
+        funcion_ponderacion: Callable[..., Iterator[tuple[int, float]]]) -> list[IdNamePeso]:
     
     dict_total_grupos: dict[int, tuple[str, float]] = {}
     for tupla in funcion_ponderacion():
@@ -251,15 +255,15 @@ def tabla_ids_recomendados_segun_iterador_ponderador(
                 dict_total_grupos[grupo_id] = (nombre, a_puntos+puntos)
             else:
                 dict_total_grupos.setdefault(grupo_id, (nombre_grupo, puntos))
-    lista_total_grupos: list[tuple[int, str, float]] = []
+    lista_total_grupos: list[IdNamePeso] = []
     for grupo_id in dict_total_grupos.keys():
         nombre, peso = dict_total_grupos[grupo_id]
-        tupla_a_sumar: tuple[int, str, float] = (grupo_id, nombre, peso)
+        tupla_a_sumar: IdNamePeso = (grupo_id, nombre, peso)
         lista_total_grupos.append(tupla_a_sumar)
     lista_total_grupos = ordenar_listatuplas(lista_total_grupos)
     return lista_total_grupos
 
-def iterador_top_grupos(f_grupos: Callable[..., list[tuple[int, str, float]]], num:int) -> Iterator[tuple[int, str, float]]:
+def iterador_top_grupos(f_grupos: Callable[..., list[IdNamePeso]], num:int) -> Iterator[IdNamePeso]:
     grupos_totales: list[tuple[int, str, float]] = f_grupos(
             funcion_ponderacion=iterador_tabla_ids_ponderados_m1
     )
@@ -270,28 +274,61 @@ def iterador_top_grupos(f_grupos: Callable[..., list[tuple[int, str, float]]], n
         else:
             pass
 
-def escupir_tabla_gid_nombre_peso(it_grupos:Callable[..., Iterator[tuple[int, str, float]]], num:int) -> Any:
-    tabla = Table(title="Más Recomendados")
-    tabla.add_column("Nombre")
-    tabla.add_column("Id")
-    tabla.add_column("Peso")
-    for grupo_id, nombre, peso in it_grupos(
+def opcion_top_grupos(num:int) -> Iterator[IdNamePeso]:
+    return iterador_top_grupos(
         f_grupos=tabla_ids_recomendados_segun_iterador_ponderador,
-        num=num
-    ):
+        num=num)
+
+def opcion_blame_grupo(gid:int) -> Iterator[IdNamePeso]:
+    return TODO()
+
+def escupir_tabla_gid_nombre_peso(
+        it_IdNP: Iterator[IdNamePeso],
+        titulo_tabla: str,
+        tupla_de_columnas: tuple[str, ...]) -> None:
+    tabla = Table(title=titulo_tabla)
+    for columna in tupla_de_columnas:
+        tabla.add_column(columna)
+    for grupo_id, nombre, peso in it_IdNP:
         idgrupo = str(grupo_id)
         puntos = str(peso)
         tabla.add_row(nombre, idgrupo, puntos)
     console = Console()
     console.print(tabla)
 
+def imprimir_opciones() -> None:
+    print("Elegir de entre las opciones:")
+    print("\t1. Imprimir grupos más recomendados")
+    print("\tTODO: Porqué un grupo")
+    print("\n\t99. Salir")
+
+def elegir_entre_opciones() -> None:
+    imprimir_opciones()
+    num_opcion:int = int(input("\nNúmero de Opción: "))
+    match num_opcion:
+        case 1:
+            numero:int = int(input("Numero de Resultados: "))
+            iterador: Iterator[IdNamePeso] = opcion_top_grupos(
+                num=numero)
+            escupir_tabla_gid_nombre_peso(
+                it_IdNP=iterador,
+                titulo_tabla="Grupos Recomendados",
+                tupla_de_columnas=("Nombre", "Id", "Peso"))
+        case 2:
+            grupo_id:int = int(input("Id del grupo a analizar: "))
+            iterador:Iterator[IdNamePeso] = opcion_blame_grupo(gid=grupo_id)
+            escupir_tabla_gid_nombre_peso(
+                it_IdNP=iterador,
+                titulo_tabla="Series Causantes",
+                tupla_de_columnas=("Nombre", "Id", "Peso"))
+        case _:
+            elegir_entre_opciones()
+
 if __name__ == "__main__":
     leer_peticiones()
     # tanto monta
-    rellenar_tabla_ids_leidos_si_necesario()
     #print(peticiones)
-    numero = int(input("Numero de Resultados: "))
-    escupir_tabla_gid_nombre_peso(it_grupos=iterador_top_grupos, num=numero)
+    elegir_entre_opciones()
     # monta tanto
-    escribir_peticiones()
+    # escribir_peticiones()
     sys.exit(0)
