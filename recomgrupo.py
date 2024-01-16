@@ -38,6 +38,8 @@ class peticiontempeada:
         self.timestamp: float = time.time()
         self.caducidad: int = (12*60*60)+randint(1, 120)
 
+despido:str = "現在我有冰淇淋\n我很喜歡冰淇淋\n但是\n《速度與激情9》\n比冰淇淋\n《速度與激-》\n《速度與激情9》\n我最喜歡\n所以現在是\n音樂時間\n準備\n\n一\n二\n三\n\n兩個禮拜以後\n《速度與激情9》\n兩個禮拜以後\n《速度與激情9》\n兩個禮拜以後\n《速度與激情9》\n\n不要忘記\n不要錯過\n去電影院\n看《速度與激情9》\n因為非常好電影\n動作非常好\n差不多一樣「冰激淋」\n再見"
+
 peticiones: list[peticiontempeada] = []
 
 def escribir_peticiones() -> None:
@@ -282,32 +284,42 @@ def iterador_top_grupos(f_grupos: Callable[..., list[IdNamePeso]], num:int) -> I
     for tupla in grupos_totales[:num]:
         yield tupla
 
-def opcion_top_grupos(num:int) -> Iterator[IdNamePeso]:
-    return iterador_top_grupos(
+def opcion_top_grupos(num:int) -> Iterator[tuple[str, ...]]:
+    for id, nombre, peso in iterador_top_grupos(
         f_grupos=tabla_GidNP_recomendados,
-        num=num)
+        num=num):
+        yield (str(id), nombre, str(peso))
 
-def opcion_blame_grupo(gid:int) -> Iterator[IdNamePeso]:
-    return iterador_series_por_grupo(grupo_id=gid)
+def opcion_blame_grupo(gid:int) -> Iterator[tuple[str, ...]]:
+    for id, nombre, peso in iterador_series_por_grupo(
+        grupo_id=gid):
+        yield (str(id), nombre, str(peso))
 
-def escupir_tabla_gid_nombre_peso(
-        it_IdNP: Iterator[IdNamePeso],
+def escupir_tabla_IdNamePeso(
+        it_tupla_imprimible: Iterator[tuple[str, ...]],
         titulo_tabla: str,
         tupla_de_columnas: tuple[str, ...]) -> None:
     tabla = Table(title=titulo_tabla)
     for columna in tupla_de_columnas:
         tabla.add_column(columna)
-    for grupo_id, nombre, peso in it_IdNP:
-        idgrupo = str(grupo_id)
-        puntos = str(peso)
-        tabla.add_row(nombre, idgrupo, puntos)
+    for fila in it_tupla_imprimible:
+        if len(tupla_de_columnas)==len(fila):
+            tabla.add_row(*fila)
+        else:
+            print("Error: longitud de fila no corresponde a la de columna")
+            print("Fila:")
+            print(f"\t{fila}")
+            print("Columnas:")
+            print(f"\t{tupla_de_columnas}")
+            sys.exit(19)
     console = Console()
     console.print(tabla)
 
 def imprimir_opciones() -> None:
     print("Elegir de entre las opciones:")
     print("\t1. Imprimir grupos más recomendados")
-    print("\t2. Porqué un grupo")
+    print("\t2. Analizar puntuación de un grupo")
+    print("\t3. Analizar puntuacion")
     print("\n\t99. Salir")
 
 def elegir_entre_opciones() -> None:
@@ -316,21 +328,22 @@ def elegir_entre_opciones() -> None:
     match num_opcion:
         case 1:
             numero:int = int(input("Numero de Resultados: "))
-            iterador: Iterator[IdNamePeso] = opcion_top_grupos(
+            iterador: Iterator[tuple[str, ...]] = opcion_top_grupos(
                 num=numero)
-            escupir_tabla_gid_nombre_peso(
-                it_IdNP=iterador,
+            escupir_tabla_IdNamePeso(
+                it_tupla_imprimible=iterador,
                 titulo_tabla="Grupos Recomendados",
                 tupla_de_columnas=("Nombre", "Id", "Peso"))
         case 2:
             grupo_id:int = int(input("Id del grupo a analizar: "))
-            iterador2:Iterator[IdNamePeso] = opcion_blame_grupo(
+            iterador2:Iterator[tuple[str, ...]] = opcion_blame_grupo(
                 gid=grupo_id)
-            escupir_tabla_gid_nombre_peso(
-                it_IdNP=iterador2,
+            escupir_tabla_IdNamePeso(
+                it_tupla_imprimible=iterador2,
                 titulo_tabla="Series Causantes",
                 tupla_de_columnas=("Nombre", "Id", "Peso"))
         case 99:
+            print(despido)
             sys.exit(0)
         case _:
             elegir_entre_opciones()
