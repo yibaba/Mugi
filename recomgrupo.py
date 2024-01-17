@@ -7,7 +7,7 @@ from numbers import Number
 import json
 import pickle
 import sys
-from typing import Any, Callable, Iterator, Type, TypeAlias, TypeVar, cast
+from typing import Any, Callable, Iterator, TypeAlias, TypeVar, cast
 #import fnmatch
 import re
 from random import randint
@@ -190,10 +190,32 @@ def iterador_cadena_json_listas() -> Iterator[str]:
 
 
 IdNamePeso: TypeAlias = tuple[int,str,float]
-def iterador_tabla_ids_ponderados_m1() -> Iterator[IdNamePeso]:
+
+def iterador_tabla_NaRatLedTot() -> Iterator[tuple[int, str, float, int, int]]:
     lista_filtrada_iterable:Iterator[str] = iterador_cadena_json_listas()
     for cadenajson in lista_filtrada_iterable:
-        #print(f"cadenajson:\n\t{cadenajson}")
+        diccionario_bucle = json.loads(cadenajson)["results"]
+        for dict_serie in diccionario_bucle:
+            rat = dict_serie["metadata"]["series"]["bayesian_rating"]
+            rat = rat if isinstance(rat, Number) else 0.0
+            assert isinstance(rat, Number)
+            rating = float(cast(float, rat))
+            id_serie: int = dict_serie["record"]["series"]["id"]
+            leidos = dict_serie["record"]["status"]["chapter"]
+            leidos = leidos if isinstance(leidos, Number) else 1
+            totales = dict_serie["metadata"]["series"]["latest_chapter"]
+            totales = totales if isinstance(totales, Number) else leidos
+            totales = totales if not totales==0 else 1
+            nombre = dict_serie["record"]["series"]["title"]
+            assert isinstance(rating, float)
+            assert isinstance(leidos, int)
+            assert isinstance(totales, int)
+            yield (id_serie, nombre, rating, leidos, totales)
+
+
+def iterador_tabla_IdNamePeso() -> Iterator[IdNamePeso]:
+    lista_filtrada_iterable:Iterator[str] = iterador_cadena_json_listas()
+    for cadenajson in lista_filtrada_iterable:
         diccionario_bucle = json.loads(cadenajson)["results"]
         for dict_serie in diccionario_bucle:
             rat = dict_serie["metadata"]["series"]["bayesian_rating"]
@@ -211,7 +233,6 @@ def iterador_tabla_ids_ponderados_m1() -> Iterator[IdNamePeso]:
             assert isinstance(leidos, int)
             assert isinstance(totales, int)
             progreso: float = leidos / totales
-            # print(f"añadiendo id {elid}")
             yield (id_serie, nombre, rating*progreso)
 
 def rellenar_grupos_de_id_si_necesario(id_serie: int) -> None:
@@ -250,7 +271,7 @@ def ordenar_listatuplas(lista_tuplas: list[IdNamePeso]) -> list[IdNamePeso]:
 
 def tabla_GidNP_recomendados() -> list[IdNamePeso]:
     dict_total_grupos: dict[int, tuple[str, float]] = {}
-    for tupla in iterador_tabla_ids_ponderados_m1():
+    for tupla in iterador_tabla_IdNamePeso():
         id_serie, nombre, puntos = tupla
         conjunto_parcial_grupos: set[tuple[int, str]] = grupos_serie_por_id(
             id=id_serie)
@@ -270,7 +291,7 @@ def tabla_GidNP_recomendados() -> list[IdNamePeso]:
 
 
 def iterador_series_por_grupo(grupo_id:int) -> Iterator[IdNamePeso]:
-    for tupla in iterador_tabla_ids_ponderados_m1():
+    for tupla in iterador_tabla_IdNamePeso():
         id_serie, nombre, puntos = tupla
         conjunto_parcial_grupos: set[tuple[int, str]] = grupos_serie_por_id(
             id=id_serie)
@@ -284,19 +305,23 @@ def iterador_top_grupos(f_grupos: Callable[..., list[IdNamePeso]], num:int) -> I
     for tupla in grupos_totales[:num]:
         yield tupla
 
-def opcion_top_grupos(num:int) -> Iterator[tuple[str, ...]]:
+def opcion_top_grupos(num: int) -> Iterator[tuple[str, ...]]:
     for id, nombre, peso in iterador_top_grupos(
         f_grupos=tabla_GidNP_recomendados,
         num=num):
         yield (str(id), nombre, str(peso))
 
-def opcion_blame_grupo(gid:int) -> Iterator[tuple[str, ...]]:
+def opcion_blame_grupo(gid: int) -> Iterator[tuple[str, ...]]:
     for id, nombre, peso in iterador_series_por_grupo(
         grupo_id=gid):
         yield (str(id), nombre, str(peso))
 
-def escupir_tabla_IdNamePeso(
-        it_tupla_imprimible: Iterator[tuple[str, ...]],
+def opcion_analiza_serie(sid: int) ->Iterator[tuple[str, ...]]
+    for id, nombre, rat, prog
+
+ItTFilas: TypeAlias = Iterator[tuple[str, ...]]
+def escupir_tabla_ItTFilas(
+        it_tupla_imprimible: ItTFilas,
         titulo_tabla: str,
         tupla_de_columnas: tuple[str, ...]) -> None:
     tabla = Table(title=titulo_tabla)
@@ -315,11 +340,12 @@ def escupir_tabla_IdNamePeso(
     console = Console()
     console.print(tabla)
 
+
 def imprimir_opciones() -> None:
     print("Elegir de entre las opciones:")
     print("\t1. Imprimir grupos más recomendados")
     print("\t2. Analizar puntuación de un grupo")
-    print("\t3. Analizar puntuacion")
+    print("\t3. Analizar puntuacion TODO")
     print("\n\t99. Salir")
 
 def elegir_entre_opciones() -> None:
@@ -328,9 +354,9 @@ def elegir_entre_opciones() -> None:
     match num_opcion:
         case 1:
             numero:int = int(input("Numero de Resultados: "))
-            iterador: Iterator[tuple[str, ...]] = opcion_top_grupos(
+            iterador: ItTFilas = opcion_top_grupos(
                 num=numero)
-            escupir_tabla_IdNamePeso(
+            escupir_tabla_ItTFilas(
                 it_tupla_imprimible=iterador,
                 titulo_tabla="Grupos Recomendados",
                 tupla_de_columnas=("Nombre", "Id", "Peso"))
@@ -338,10 +364,17 @@ def elegir_entre_opciones() -> None:
             grupo_id:int = int(input("Id del grupo a analizar: "))
             iterador2:Iterator[tuple[str, ...]] = opcion_blame_grupo(
                 gid=grupo_id)
-            escupir_tabla_IdNamePeso(
+            escupir_tabla_ItTFilas(
                 it_tupla_imprimible=iterador2,
                 titulo_tabla="Series Causantes",
                 tupla_de_columnas=("Nombre", "Id", "Peso"))
+        case 3:
+            id_serie:int = int(input("\nId de la serie a analizar: "))
+            iterador3: ItTFilas = todo
+            escupir_tabla_ItTFilas(
+                it_tupla_imprimible=iterador3,
+                titulo_tabla="Desglose Series",
+                tupla_de_columnas=("Nombre", "Puntuación", "Leidos", "Total"))
         case 99:
             print(despido)
             sys.exit(0)
