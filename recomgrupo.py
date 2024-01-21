@@ -156,10 +156,22 @@ def rellenar_tabla_ids_leidos_si_necesario() -> None:
         cont: str = json.dumps(longitud)
         peticion: requests.Response = hacer_peticion_post(url=url, cont=cont)
         if peticion.ok:
-            cachear_peticion(peticion=peticion, url=url, caducidad=-1)
+            cachear_peticion(peticion=peticion, url=url)
         else:
             print("error petición tabla ids")
             sys.exit(peticion.status_code)
+
+def rellenar_serie_id_si_necesario(id: int) -> None:
+    url: str = f"https://api.mangaupdates.com/v1/series/{id}"
+    if comprobar_si_toca_pedir(url):
+        print("serie id leidos no encontrado")
+        peticion: requests.Response = hacer_peticion_get(url=url)
+        if peticion.ok:
+            cachear_peticion(peticion=peticion, url=url)
+        else:
+            print("error petición serie id")
+            sys.exit(peticion.status_code)
+
 
 def devolver_lista_ocurrencias_por_linkapi(expr:str) -> list[peticiontempeada]|None:
     r = re.compile(expr)
@@ -188,10 +200,42 @@ def iterador_cadena_json_listas() -> Iterator[str]:
         lista=lista_filtrada,
         propiedad="stringjson")
 
+def conseguir_cadena_json_capo(id: int) -> Iterator[str]:
+    rellenar_serie_id_si_necesario(id=id)
+    lista_capo: list[peticiontempeada]|None = devolver_lista_ocurrencias_por_linkapi(
+        f"^https://api.mangaupdates.com/v1/series/{id}$")
+    if lista_capo is None:
+        print("no se encuentra tal ocurrencia")
+        print("fallo al construir lista_capo")
+        sys.exit(12)
+    return lista_peticiones_a_iterator_de_propiedad(
+        lista=lista_capo,
+        propiedad="stringjson")
+
+def conseguir_total_caps(id: int) -> int|None:
+    capo_json: Iterator[str] = conseguir_cadena_json_capo(id)
+    patron: str = r"^\d+$"
+    r = re.compile(patron)
+    dig = r"\d+"
+    for cadenajson in capo_json:
+        estatus: str|None = json.loads(cadenajson)["status"]
+        #print(estatus)
+        if estatus is None:
+            l_num = []
+        else:
+            lista_json: list[str] = re.findall(dig, estatus)
+            l_cad_num: list[str] = list(filter(lambda x: r.match(x), lista_json))
+            l_num: list[int] = list(map(lambda x: int(x), l_cad_num))
+        if not l_num:
+            #print(cadenajson)
+            return None
+        else:
+            return max(l_num)
+
 
 IdNamePeso: TypeAlias = tuple[int,str,float]
 
-def iterador_tabla_NaRatLedTot() -> Iterator[tuple[int, str, float, int, int]]:
+def iterador_tabla_IdNaRatLedTot() -> Iterator[tuple[int, str, float, int, int]]:
     lista_filtrada_iterable:Iterator[str] = iterador_cadena_json_listas()
     for cadenajson in lista_filtrada_iterable:
         diccionario_bucle = json.loads(cadenajson)["results"]
@@ -203,37 +247,28 @@ def iterador_tabla_NaRatLedTot() -> Iterator[tuple[int, str, float, int, int]]:
             id_serie: int = dict_serie["record"]["series"]["id"]
             leidos = dict_serie["record"]["status"]["chapter"]
             leidos = leidos if isinstance(leidos, Number) else 1
-            totales = dict_serie["metadata"]["series"]["latest_chapter"]
-            totales = totales if isinstance(totales, Number) else leidos
-            totales = totales if not totales==0 else 1
+            # totales = dict_serie["metadata"]["series"]["latest_chapter"]
+            # totales = totales if isinstance(totales, Number) else leidos
+            # totales = totales if not totales==0 else 1
+            totales: int|None = conseguir_total_caps(id=id_serie)
+            if totales is None:
+                totales = dict_serie["metadata"]["series"]["latest_chapter"]
+                totales = totales if isinstance(totales, Number) else leidos
+                totales = totales if not totales==0 else 1
+            if cast(int, leidos)>totales:
+                totales = 1
+                leidos = 1
             nombre = dict_serie["record"]["series"]["title"]
             assert isinstance(rating, float)
             assert isinstance(leidos, int)
             assert isinstance(totales, int)
-            yield (id_serie, nombre, rating, leidos, totales)
+            yield (id_serie, nombre, rating, leidos, 1)
 
 
 def iterador_tabla_IdNamePeso() -> Iterator[IdNamePeso]:
-    lista_filtrada_iterable:Iterator[str] = iterador_cadena_json_listas()
-    for cadenajson in lista_filtrada_iterable:
-        diccionario_bucle = json.loads(cadenajson)["results"]
-        for dict_serie in diccionario_bucle:
-            rat = dict_serie["metadata"]["series"]["bayesian_rating"]
-            rat = rat if isinstance(rat, Number) else 0.0
-            assert isinstance(rat, Number)
-            rating = float(cast(float, rat))
-            id_serie: int = dict_serie["record"]["series"]["id"]
-            leidos = dict_serie["record"]["status"]["chapter"]
-            leidos = leidos if isinstance(leidos, Number) else 1
-            totales = dict_serie["metadata"]["series"]["latest_chapter"]
-            totales = totales if isinstance(totales, Number) else leidos
-            totales = totales if not totales==0 else 1
-            nombre = dict_serie["record"]["series"]["title"]
-            assert isinstance(rating, float)
-            assert isinstance(leidos, int)
-            assert isinstance(totales, int)
-            progreso: float = leidos / totales
-            yield (id_serie, nombre, rating*progreso)
+    for id, na, rat, led, tot in iterador_tabla_IdNaRatLedTot():
+        prog = led / tot
+        yield (id, na, rat*prog)
 
 def rellenar_grupos_de_id_si_necesario(id_serie: int) -> None:
     url = f"https://api.mangaupdates.com/v1/series/{id_serie}/groups"
@@ -316,8 +351,13 @@ def opcion_blame_grupo(gid: int) -> Iterator[tuple[str, ...]]:
         grupo_id=gid):
         yield (str(id), nombre, str(peso))
 
-def opcion_analiza_serie(sid: int) ->Iterator[tuple[str, ...]]
-    for id, nombre, rat, prog
+def opcion_analiza_serie(sid: int) ->Iterator[tuple[str, ...]]:
+    for id, nom, rat, led, tot in iterador_tabla_IdNaRatLedTot():
+        if sid==id:
+            rating: str = str(rat)
+            leidos: str = str(led)
+            total: str = str(tot)
+            yield (nom, rating, leidos, total)
 
 ItTFilas: TypeAlias = Iterator[tuple[str, ...]]
 def escupir_tabla_ItTFilas(
@@ -345,7 +385,7 @@ def imprimir_opciones() -> None:
     print("Elegir de entre las opciones:")
     print("\t1. Imprimir grupos más recomendados")
     print("\t2. Analizar puntuación de un grupo")
-    print("\t3. Analizar puntuacion TODO")
+    print("\t3. Analizar puntuacion")
     print("\n\t99. Salir")
 
 def elegir_entre_opciones() -> None:
@@ -367,10 +407,10 @@ def elegir_entre_opciones() -> None:
             escupir_tabla_ItTFilas(
                 it_tupla_imprimible=iterador2,
                 titulo_tabla="Series Causantes",
-                tupla_de_columnas=("Nombre", "Id", "Peso"))
+                tupla_de_columnas=("Id", "Nombre", "Peso"))
         case 3:
             id_serie:int = int(input("\nId de la serie a analizar: "))
-            iterador3: ItTFilas = todo
+            iterador3: ItTFilas = opcion_analiza_serie(sid=id_serie)
             escupir_tabla_ItTFilas(
                 it_tupla_imprimible=iterador3,
                 titulo_tabla="Desglose Series",
