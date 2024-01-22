@@ -234,8 +234,8 @@ def conseguir_total_caps(id: int) -> int|None:
 
 
 IdNamePeso: TypeAlias = tuple[int,str,float]
-
-def iterador_tabla_IdNaRatLedTot() -> Iterator[tuple[int, str, float, int, int]]:
+IdNaRatLedTot: TypeAlias = tuple[int, str, float, int, int]
+def iterador_tabla_IdNaRatLedTot() -> Iterator[IdNaRatLedTot]:
     lista_filtrada_iterable:Iterator[str] = iterador_cadena_json_listas()
     for cadenajson in lista_filtrada_iterable:
         diccionario_bucle = json.loads(cadenajson)["results"]
@@ -253,9 +253,9 @@ def iterador_tabla_IdNaRatLedTot() -> Iterator[tuple[int, str, float, int, int]]
             totales: int|None = conseguir_total_caps(id=id_serie)
             if totales is None:
                 totales = dict_serie["metadata"]["series"]["latest_chapter"]
-                totales = totales if isinstance(totales, Number) else leidos
+                totales = totales if isinstance(totales, Number) else cast(int, leidos)
                 totales = totales if not totales==0 else 1
-            if cast(int, leidos)>totales:
+            if cast(int, leidos)>cast(int, totales):
                 totales = 1
                 leidos = 1
             nombre = dict_serie["record"]["series"]["title"]
@@ -386,6 +386,7 @@ def imprimir_opciones() -> None:
     print("\t1. Imprimir grupos más recomendados")
     print("\t2. Analizar puntuación de un grupo")
     print("\t3. Analizar puntuacion")
+    print("\tTODO. Recomendador versión clásica")
     print("\n\t99. Salir")
 
 def elegir_entre_opciones() -> None:
@@ -393,7 +394,7 @@ def elegir_entre_opciones() -> None:
     num_opcion:int = int(input("\nNúmero de Opción: "))
     match num_opcion:
         case 1:
-            numero:int = int(input("Numero de Resultados: "))
+            numero: int = int(input("Numero de Resultados: "))
             iterador: ItTFilas = opcion_top_grupos(
                 num=numero)
             escupir_tabla_ItTFilas(
@@ -401,8 +402,8 @@ def elegir_entre_opciones() -> None:
                 titulo_tabla="Grupos Recomendados",
                 tupla_de_columnas=("Nombre", "Id", "Peso"))
         case 2:
-            grupo_id:int = int(input("Id del grupo a analizar: "))
-            iterador2:Iterator[tuple[str, ...]] = opcion_blame_grupo(
+            grupo_id: int = int(input("Id del grupo a analizar: "))
+            iterador2: Iterator[tuple[str, ...]] = opcion_blame_grupo(
                 gid=grupo_id)
             escupir_tabla_ItTFilas(
                 it_tupla_imprimible=iterador2,
@@ -415,6 +416,13 @@ def elegir_entre_opciones() -> None:
                 it_tupla_imprimible=iterador3,
                 titulo_tabla="Desglose Series",
                 tupla_de_columnas=("Nombre", "Puntuación", "Leidos", "Total"))
+        case 4:
+            numero: int = int(input("Numero de recomendaciones:"))
+            iterador4: ItTFilas = opcion_recs_clasico(num=numero)
+            escupir_tabla_ItTFilas(
+                it_tupla_imprimible=iterador4, 
+                titulo_tabla="Series Recomendadas", 
+                tupla_de_columnas=("Id", "Nombre", "Peso"))
         case 99:
             print(despido)
             sys.exit(0)
