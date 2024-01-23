@@ -11,6 +11,7 @@ from typing import Any, Callable, Iterator, TypeAlias, TypeVar, cast
 #import fnmatch
 import re
 from random import randint
+import itertools
 
 cooloff: float = 0.5
 
@@ -200,6 +201,13 @@ def iterador_cadena_json_listas() -> Iterator[str]:
         lista=lista_filtrada,
         propiedad="stringjson")
 
+def iterador_cadenajson_de_series_leyendo() -> Iterator[str]:
+    lista_ids_leyendas: Iterator[str] = iterador_cadena_json_listas()
+    for cadenajson in lista_ids_leyendas:
+        diccionario_bucle = json.loads(cadenajson)["results"]
+        for dict_serie in diccionario_bucle:
+            yield json.dumps(dict_serie)
+
 def conseguir_cadena_json_capo(id: int) -> Iterator[str]:
     rellenar_serie_id_si_necesario(id=id)
     lista_capo: list[peticiontempeada]|None = devolver_lista_ocurrencias_por_linkapi(
@@ -232,38 +240,83 @@ def conseguir_total_caps(id: int) -> int|None:
         else:
             return max(l_num)
 
+IdNaRatLedTot: TypeAlias = tuple[int, str, float, int, int]
+def cadenajson_lista_a_tabla_IdNaRatLedTot(cadenajson:str) -> IdNaRatLedTot:
+    dict_serie = json.loads(cadenajson)
+    rat = dict_serie["metadata"]["series"]["bayesian_rating"]
+    rat = rat if isinstance(rat, Number) else 0.0
+    assert isinstance(rat, Number)
+    rating = float(cast(float, rat))
+    id_serie: int = dict_serie["record"]["series"]["id"]
+    leidos = dict_serie["record"]["status"]["chapter"]
+    leidos = leidos if isinstance(leidos, Number) else 1
+    # totales = dict_serie["metadata"]["series"]["latest_chapter"]
+    # totales = totales if isinstance(totales, Number) else leidos
+    # totales = totales if not totales==0 else 1
+    totales: int|None = conseguir_total_caps(id=id_serie)
+    if totales is None:
+        totales = dict_serie["metadata"]["series"]["latest_chapter"]
+        totales = totales if isinstance(totales, Number) else cast(int, leidos)
+        totales = totales if not totales==0 else 1
+    if cast(int, leidos)>cast(int, totales):
+        totales = 1
+        leidos = 1
+    nombre = dict_serie["record"]["series"]["title"]
+    assert isinstance(rating, float)
+    assert isinstance(leidos, int)
+    assert isinstance(totales, int)
+    return (id_serie, nombre, rating, leidos, totales)
+
+def iterador_tabla_IdNaRatLedTot() -> Iterator[IdNaRatLedTot]:
+    for cadenajson in iterador_cadenajson_de_series_leyendo():
+        yield cadenajson_lista_a_tabla_IdNaRatLedTot(cadenajson=cadenajson)
+
+def cadenajson_serie_a_tabla_IdNaRatLedTot(cadenajson:str) -> IdNaRatLedTot:
+    dict_serie = json.loads(cadenajson)
+    id_serie: int = dict_serie["series_id"]
+    for id, na, rat, led, tot in iterador_tabla_IdNaRatLedTot():
+        if id==id_serie:
+            return (id, na, rat, led, tot)
+    return (0, "0", 6, 1, 1)
 
 IdNamePeso: TypeAlias = tuple[int,str,float]
-IdNaRatLedTot: TypeAlias = tuple[int, str, float, int, int]
-def iterador_tabla_IdNaRatLedTot() -> Iterator[IdNaRatLedTot]:
-    lista_filtrada_iterable:Iterator[str] = iterador_cadena_json_listas()
-    for cadenajson in lista_filtrada_iterable:
-        diccionario_bucle = json.loads(cadenajson)["results"]
-        for dict_serie in diccionario_bucle:
-            rat = dict_serie["metadata"]["series"]["bayesian_rating"]
-            rat = rat if isinstance(rat, Number) else 0.0
-            assert isinstance(rat, Number)
-            rating = float(cast(float, rat))
-            id_serie: int = dict_serie["record"]["series"]["id"]
-            leidos = dict_serie["record"]["status"]["chapter"]
-            leidos = leidos if isinstance(leidos, Number) else 1
-            # totales = dict_serie["metadata"]["series"]["latest_chapter"]
-            # totales = totales if isinstance(totales, Number) else leidos
-            # totales = totales if not totales==0 else 1
-            totales: int|None = conseguir_total_caps(id=id_serie)
-            if totales is None:
-                totales = dict_serie["metadata"]["series"]["latest_chapter"]
-                totales = totales if isinstance(totales, Number) else cast(int, leidos)
-                totales = totales if not totales==0 else 1
-            if cast(int, leidos)>cast(int, totales):
-                totales = 1
-                leidos = 1
-            nombre = dict_serie["record"]["series"]["title"]
-            assert isinstance(rating, float)
-            assert isinstance(leidos, int)
-            assert isinstance(totales, int)
-            yield (id_serie, nombre, rating, leidos, 1)
+def iterador_sid_a_catrecsyrecs_IdNaWh(sid:int) -> Iterator[IdNamePeso]:
+    cadjsonserie = conseguir_cadena_json_capo(sid)
+    for cadenajson in cadjsonserie:
+        dict_serie = json.loads(cadenajson)
+        ckid, _, rat,led, tot = cadenajson_serie_a_tabla_IdNaRatLedTot(cadenajson)
+        if ckid==0:
+            print("error cadenajson de serie estaba en la lista")
+            sys.exit(58)
+        prepeso = rat*(led / tot)
+        rectab = dict_serie["recommendations"]
+        catrectab = dict_serie["category_recommendations"]
+        if rectab:
+            for dict_recs in rectab:
+                if dict_recs:
+                    peso = prepeso * dict_recs["weight"]
+                    yield (dict_recs["series_id"], 
+                           dict_recs["series_name"], 
+                           peso)
+        if catrectab:
+            for dict_recs in catrectab:
+                if dict_recs:
+                    peso = prepeso * dict_recs["weight"]
+                    yield (dict_recs["series_id"], 
+                           dict_recs["series_name"], 
+                           peso)
 
+def iterador_tabla_recs_nat_IdNaP():
+    conjunto_leyendo: set[int] = set()
+    for cadenajson in iterador_cadenajson_de_series_leyendo():
+        dict_serie_lista = json.loads(cadenajson)
+        conjunto_leyendo.add(
+            dict_serie_lista["record"]["series"]["id"])
+    for sid in conjunto_leyendo:
+        for id_recseries, nombre, peso in iterador_sid_a_catrecsyrecs_IdNaWh(
+            sid=sid):
+            if not (id_recseries in conjunto_leyendo):
+                yield (id_recseries, nombre, peso)
 
 def iterador_tabla_IdNamePeso() -> Iterator[IdNamePeso]:
     for id, na, rat, led, tot in iterador_tabla_IdNaRatLedTot():
@@ -324,7 +377,6 @@ def tabla_GidNP_recomendados() -> list[IdNamePeso]:
     lista_total_grupos = ordenar_listatuplas(lista_total_grupos)
     return lista_total_grupos
 
-
 def iterador_series_por_grupo(grupo_id:int) -> Iterator[IdNamePeso]:
     for tupla in iterador_tabla_IdNamePeso():
         id_serie, nombre, puntos = tupla
@@ -334,24 +386,36 @@ def iterador_series_por_grupo(grupo_id:int) -> Iterator[IdNamePeso]:
             if gid==grupo_id:
                 yield (id_serie, nombre, puntos)
 
-
 def iterador_top_grupos(f_grupos: Callable[..., list[IdNamePeso]], num:int) -> Iterator[IdNamePeso]:
     grupos_totales: list[tuple[int, str, float]] = f_grupos()
     for tupla in grupos_totales[:num]:
         yield tupla
 
-def opcion_top_grupos(num: int) -> Iterator[tuple[str, ...]]:
+def iterador_recs_nativo() -> Iterator[IdNamePeso]:
+    dict_respuesta: dict[int, tuple[str, float]] = {}
+    for id, nom, wht in iterador_tabla_recs_nat_IdNaP():
+        if id in dict_respuesta.keys():
+            nombre, a_peso = dict_respuesta[id]
+            dict_respuesta[id] = (nombre, a_peso+wht)
+        else:
+            dict_respuesta.setdefault(id, (nom, wht))
+    for sid in dict_respuesta.keys():
+        nombre, peso = dict_respuesta[sid]
+        yield (sid, nombre, peso)
+
+ItTFilas: TypeAlias = Iterator[tuple[str, ...]]
+def opcion_top_grupos(num: int) -> ItTFilas:
     for id, nombre, peso in iterador_top_grupos(
         f_grupos=tabla_GidNP_recomendados,
         num=num):
         yield (str(id), nombre, str(peso))
 
-def opcion_blame_grupo(gid: int) -> Iterator[tuple[str, ...]]:
+def opcion_blame_grupo(gid: int) -> ItTFilas:
     for id, nombre, peso in iterador_series_por_grupo(
         grupo_id=gid):
         yield (str(id), nombre, str(peso))
 
-def opcion_analiza_serie(sid: int) ->Iterator[tuple[str, ...]]:
+def opcion_analiza_serie(sid: int) ->ItTFilas:
     for id, nom, rat, led, tot in iterador_tabla_IdNaRatLedTot():
         if sid==id:
             rating: str = str(rat)
@@ -359,7 +423,13 @@ def opcion_analiza_serie(sid: int) ->Iterator[tuple[str, ...]]:
             total: str = str(tot)
             yield (nom, rating, leidos, total)
 
-ItTFilas: TypeAlias = Iterator[tuple[str, ...]]
+def opcion_recs_clasico(num: int) -> ItTFilas:
+    for id, nombre, wght in itertools.islice(
+        iterador_recs_nativo(), num):
+        sid: str = str(id)
+        peso: str = str(wght)
+        yield (sid, nombre, peso)
+
 def escupir_tabla_ItTFilas(
         it_tupla_imprimible: ItTFilas,
         titulo_tabla: str,
@@ -386,7 +456,8 @@ def imprimir_opciones() -> None:
     print("\t1. Imprimir grupos más recomendados")
     print("\t2. Analizar puntuación de un grupo")
     print("\t3. Analizar puntuacion")
-    print("\tTODO. Recomendador versión clásica")
+    print("\t4. Recomendador versión clásica")
+    print("\tTODO. Id de serie a enlace")
     print("\n\t99. Salir")
 
 def elegir_entre_opciones() -> None:
