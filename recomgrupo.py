@@ -12,9 +12,8 @@ from typing import Any, Callable, Iterator, TypeAlias, TypeVar, cast
 import re
 from random import randint
 import itertools
-import math
 
-cooloff: float = 0.5
+cooloff: float = 0.7
 
 class tokenBearer:
     def __init__(self) -> None:
@@ -169,7 +168,8 @@ def rellenar_serie_id_si_necesario(id: int) -> None:
         print("serie id leidos no encontrado")
         peticion: requests.Response = hacer_peticion_get(url=url)
         if peticion.ok:
-            cachear_peticion(peticion=peticion, url=url)
+            caducidad: int = randint(1,7)*((24*60*60) + randint(0,3600))
+            cachear_peticion(peticion=peticion, url=url, caducidad=caducidad)
         else:
             print("error petición serie id")
             print(url)
@@ -229,7 +229,6 @@ def conseguir_total_caps(id: int) -> int|None:
     dig = r"\d+"
     for cadenajson in capo_json:
         estatus: str|None = json.loads(cadenajson)["status"]
-        #print(estatus)
         if estatus is None:
             l_num = []
         else:
@@ -237,7 +236,6 @@ def conseguir_total_caps(id: int) -> int|None:
             l_cad_num: list[str] = list(filter(lambda x: r.match(x), lista_json))
             l_num: list[int] = list(map(lambda x: int(x), l_cad_num))
         if not l_num:
-            #print(cadenajson)
             return None
         else:
             return max(l_num)
@@ -347,7 +345,8 @@ def rellenar_grupos_de_id_si_necesario(id_serie: int) -> None:
     if comprobar_si_toca_pedir(url):
         peticion = hacer_peticion_get(url=url)
         if peticion.ok:
-            cachear_peticion(peticion=peticion, url=url)
+            caducidad: int = randint(1,7)*((24*60*60) + randint(0,3600))
+            cachear_peticion(peticion=peticion, url=url, caducidad=caducidad)
         else:
             print("error petición series id")
             sys.exit(peticion.status_code)
@@ -407,7 +406,7 @@ def series_grupo_por_id(gid: int) -> Iterator[IdNamePeso]:
             if id is not None:
                 series_uniq.add((id, nom))
             else:
-                print(nom)
+                print(f"Nombre {nom}")
     for sid, nombre in series_uniq:
         cadjsonserie = conseguir_cadena_json_capo(id=sid)
         for cadenajson in cadjsonserie:
@@ -489,17 +488,21 @@ def iterador_recs_basado_gr(num: int) -> Iterator[tuple[int, str, str, float]]:
     printejo = 0
     while bucleando:
         id, nom, wht = grupos_totales[0]
-        print(nom)
+        print(f"{nom}, {wht}")
         if wht>0:
             if id in cuenta.keys():
                 cuenta[id] += 1
             else:
                 cuenta.setdefault(id, 0)
-            grupos_totales.append((id, nom, wht-resta))
+            nuevo_peso = wht - resta
+            grupos_totales.append((id, nom, nuevo_peso))
             del grupos_totales[0]
             grupos_totales = ordenar_listatuplas(grupos_totales)
             sid, na = conseguir_serie_grupo(gid=id, cuenta=cuenta[id])
-            if (not sid in tabla_tenidos) and (sid!=0):
+            while (sid in tabla_tenidos) and (sid!=0):
+                cuenta[id] +=1
+                sid, na = conseguir_serie_grupo(gid=id, cuenta=cuenta[id])
+            if sid!=0:
                 printejo += 1
                 print(printejo)
                 tabla_tenidos.append(sid)
@@ -576,7 +579,7 @@ def imprimir_opciones() -> None:
     print("\t3. Analizar puntuacion")
     print("\t4. Recomendador versión clásica")
     print("\t5. Id de serie a enlace")
-    print("\tTODO. Recomendador versión grupos")
+    print("\t6. Recomendador versión grupos")
     print("\n\t99. Salir")
 
 def elegir_entre_opciones() -> None:
