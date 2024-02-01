@@ -12,6 +12,7 @@ from typing import Any, Callable, Iterator, TypeAlias, TypeVar, cast
 import re
 from random import randint
 import itertools
+import math
 
 cooloff: float = 0.5
 
@@ -37,7 +38,7 @@ class peticiontempeada:
         self.linkapi: str = ""
         self.stringjson: str  = "{}"
         self.timestamp: float = time.time()
-        self.caducidad: int = (12*60*60)+randint(1, 120)
+        self.caducidad: int = randint(1, 3)*((12*60*60)+randint(1, 120))
 
 despido:str = "現在我有冰淇淋\n我很喜歡冰淇淋\n但是\n《速度與激情9》\n比冰淇淋\n《速度與激-》\n《速度與激情9》\n我最喜歡\n所以現在是\n音樂時間\n準備\n\n一\n二\n三\n\n兩個禮拜以後\n《速度與激情9》\n兩個禮拜以後\n《速度與激情9》\n兩個禮拜以後\n《速度與激情9》\n\n不要忘記\n不要錯過\n去電影院\n看《速度與激情9》\n因為非常好電影\n動作非常好\n差不多一樣「冰激淋」\n再見"
 
@@ -171,6 +172,7 @@ def rellenar_serie_id_si_necesario(id: int) -> None:
             cachear_peticion(peticion=peticion, url=url)
         else:
             print("error petición serie id")
+            print(url)
             sys.exit(peticion.status_code)
 
 
@@ -271,6 +273,13 @@ def iterador_tabla_IdNaRatLedTot() -> Iterator[IdNaRatLedTot]:
     for cadenajson in iterador_cadenajson_de_series_leyendo():
         yield cadenajson_lista_a_tabla_IdNaRatLedTot(cadenajson=cadenajson)
 
+def iterador_id_a_link(id: int) -> str:
+    resultado: str = ""
+    dict_serie = conseguir_cadena_json_capo(id=id)
+    for cadjson in dict_serie:
+        resultado = json.loads(cadjson)["url"]
+    return resultado
+
 def cadenajson_serie_a_tabla_IdNaRatLedTot(cadenajson:str) -> IdNaRatLedTot:
     dict_serie = json.loads(cadenajson)
     id_serie: int = dict_serie["series_id"]
@@ -306,6 +315,16 @@ def iterador_sid_a_catrecsyrecs_IdNaWh(sid:int) -> Iterator[IdNamePeso]:
                            dict_recs["series_name"], 
                            peso)
 
+def cadenajson_serie_a_IdNamePeso(cadenajson: str) -> IdNamePeso:
+    dict_serie = json.loads(cadenajson)
+    sid = dict_serie["series_id"]
+    nombre = dict_serie["title"]
+    prepeso: float|None = dict_serie["bayesian_rating"]
+    peso: float = 0.0
+    if prepeso is not None:
+        peso = prepeso
+    return (sid, nombre, peso)
+
 def iterador_tabla_recs_nat_IdNaP():
     conjunto_leyendo: set[int] = set()
     for cadenajson in iterador_cadenajson_de_series_leyendo():
@@ -333,6 +352,17 @@ def rellenar_grupos_de_id_si_necesario(id_serie: int) -> None:
             print("error petición series id")
             sys.exit(peticion.status_code)
 
+def rellenar_series_de_grupo_de_id_si_necesario(gid: int) -> None:
+    url = f"https://api.mangaupdates.com/v1/groups/{gid}/series"
+    if comprobar_si_toca_pedir(url):
+        peticion = hacer_peticion_get(url=url)
+        if peticion.ok:
+            cachear_peticion(peticion=peticion, url=url)
+        else:
+            print("error petición grupo id")
+            sys.exit(peticion.status_code)
+
+
 def grupos_serie_por_id(id: int) -> set[tuple[int, str]]:
     rellenar_grupos_de_id_si_necesario(id_serie=id)
     lista_recomendados: list[peticiontempeada]|None = devolver_lista_ocurrencias_por_linkapi(
@@ -357,6 +387,40 @@ def ordenar_listatuplas(lista_tuplas: list[IdNamePeso]) -> list[IdNamePeso]:
     newlist = sorted(lista_tuplas, key=lambda x: x[2], reverse=True)
     return newlist
 
+def series_grupo_por_id(gid: int) -> Iterator[IdNamePeso]:
+    rellenar_series_de_grupo_de_id_si_necesario(gid=gid)
+    lista_recomendados: list[peticiontempeada]|None = devolver_lista_ocurrencias_por_linkapi(
+        f"^https://api.mangaupdates.com/v1/groups/{gid}/series$")
+    if lista_recomendados is None:
+        print("no se encuentra tal ocurrencia")
+        print("fallo al construir lista_recomendados")
+        sys.exit(12)
+    lista_recomendados_iterable: Iterator[str] = lista_peticiones_a_iterator_de_propiedad(
+        lista=lista_recomendados,
+        propiedad="stringjson")
+    series_uniq: set[tuple[int, str]] = set()
+    for cadenajson in lista_recomendados_iterable:
+        diccionario_bucle = json.loads(cadenajson)["series_titles"]
+        for dict_series in diccionario_bucle:
+            id = dict_series["series_id"]
+            nom = dict_series["title"]
+            if id is not None:
+                series_uniq.add((id, nom))
+            else:
+                print(nom)
+    for sid, nombre in series_uniq:
+        cadjsonserie = conseguir_cadena_json_capo(id=sid)
+        for cadenajson in cadjsonserie:
+            _, _, peso = cadenajson_serie_a_IdNamePeso(cadenajson=cadenajson)
+            yield (sid, nombre, peso)
+
+def series_grupo_por_id_ordenadas(gid: int) -> list[IdNamePeso]:
+    lista_series: list[IdNamePeso] = []
+    for id, nom, wht in series_grupo_por_id(
+        gid=gid):
+        lista_series.append((id, nom, wht))
+    return ordenar_listatuplas(lista_series)
+
 def tabla_GidNP_recomendados() -> list[IdNamePeso]:
     dict_total_grupos: dict[int, tuple[str, float]] = {}
     for tupla in iterador_tabla_IdNamePeso():
@@ -377,6 +441,14 @@ def tabla_GidNP_recomendados() -> list[IdNamePeso]:
     lista_total_grupos = ordenar_listatuplas(lista_total_grupos)
     return lista_total_grupos
 
+def conseguir_serie_grupo(gid: int, cuenta: int) -> tuple[int, str]:
+    lista_series: list[IdNamePeso] = series_grupo_por_id_ordenadas(gid=gid)
+    if len(lista_series)>cuenta:
+        id, nom, _= lista_series[cuenta]
+        return (id, nom)
+    else:
+        return (0, "")
+
 def iterador_series_por_grupo(grupo_id:int) -> Iterator[IdNamePeso]:
     for tupla in iterador_tabla_IdNamePeso():
         id_serie, nombre, puntos = tupla
@@ -387,7 +459,7 @@ def iterador_series_por_grupo(grupo_id:int) -> Iterator[IdNamePeso]:
                 yield (id_serie, nombre, puntos)
 
 def iterador_top_grupos(f_grupos: Callable[..., list[IdNamePeso]], num:int) -> Iterator[IdNamePeso]:
-    grupos_totales: list[tuple[int, str, float]] = f_grupos()
+    grupos_totales: list[IdNamePeso] = f_grupos()
     for tupla in grupos_totales[:num]:
         yield tupla
 
@@ -402,6 +474,38 @@ def iterador_recs_nativo() -> Iterator[IdNamePeso]:
     for sid in dict_respuesta.keys():
         nombre, peso = dict_respuesta[sid]
         yield (sid, nombre, peso)
+
+def iterador_recs_basado_gr(num: int) -> Iterator[tuple[int, str, str, float]]:
+    bucleando: bool = True
+    grupos_totales: list[IdNamePeso] = tabla_GidNP_recomendados()
+    tabla_tenidos: list[int] = []
+    total_puntos: float = 0.0
+    for _, _, wht in grupos_totales:
+        total_puntos += wht
+    resta: float = total_puntos / num
+    for id, _, _, _, _ in iterador_tabla_IdNaRatLedTot():
+        tabla_tenidos.append(id)
+    cuenta: dict[int, int] ={}
+    printejo = 0
+    while bucleando:
+        id, nom, wht = grupos_totales[0]
+        print(nom)
+        if wht>0:
+            if id in cuenta.keys():
+                cuenta[id] += 1
+            else:
+                cuenta.setdefault(id, 0)
+            grupos_totales.append((id, nom, wht-resta))
+            del grupos_totales[0]
+            grupos_totales = ordenar_listatuplas(grupos_totales)
+            sid, na = conseguir_serie_grupo(gid=id, cuenta=cuenta[id])
+            if (not sid in tabla_tenidos) and (sid!=0):
+                printejo += 1
+                print(printejo)
+                tabla_tenidos.append(sid)
+                yield (sid, na, nom, wht)
+        else:
+            bucleando = False
 
 ItTFilas: TypeAlias = Iterator[tuple[str, ...]]
 def opcion_top_grupos(num: int) -> ItTFilas:
@@ -430,6 +534,20 @@ def opcion_recs_clasico(num: int) -> ItTFilas:
         peso: str = str(wght)
         yield (sid, nombre, peso)
 
+def opcion_id_a_url(id: int) -> ItTFilas:
+    url_resultado: str = ""
+    rid: str = str(id)
+    for caracter in iterador_id_a_link(id):
+        url_resultado += caracter
+    yield (rid, url_resultado)
+
+def opcion_recs_grupo(num: int) -> ItTFilas:
+    for id, nombre, nombre_grupo, wht in itertools.islice(
+        iterador_recs_basado_gr(num), num):
+        sid: str = str(id)
+        peso: str = str(wht)
+        yield (sid, nombre, nombre_grupo, peso)
+
 def escupir_tabla_ItTFilas(
         it_tupla_imprimible: ItTFilas,
         titulo_tabla: str,
@@ -457,7 +575,8 @@ def imprimir_opciones() -> None:
     print("\t2. Analizar puntuación de un grupo")
     print("\t3. Analizar puntuacion")
     print("\t4. Recomendador versión clásica")
-    print("\tTODO. Id de serie a enlace")
+    print("\t5. Id de serie a enlace")
+    print("\tTODO. Recomendador versión grupos")
     print("\n\t99. Salir")
 
 def elegir_entre_opciones() -> None:
@@ -488,12 +607,27 @@ def elegir_entre_opciones() -> None:
                 titulo_tabla="Desglose Series",
                 tupla_de_columnas=("Nombre", "Puntuación", "Leidos", "Total"))
         case 4:
-            numero: int = int(input("Numero de recomendaciones:"))
+            numero: int = int(input("Número de recomendaciones:"))
             iterador4: ItTFilas = opcion_recs_clasico(num=numero)
             escupir_tabla_ItTFilas(
                 it_tupla_imprimible=iterador4, 
                 titulo_tabla="Series Recomendadas", 
                 tupla_de_columnas=("Id", "Nombre", "Peso"))
+        case 5:
+            id_entrada: int = int(input("Id de serie: "))
+            iterador5: ItTFilas = opcion_id_a_url(id=id_entrada)
+            escupir_tabla_ItTFilas(
+                it_tupla_imprimible=iterador5, 
+                titulo_tabla="Resultado", 
+                tupla_de_columnas=("Id", "Url"))
+        case 6:
+            pass
+            numero: int = int(input("Número de recomendaciones: "))
+            iterador6: ItTFilas = opcion_recs_grupo(num=numero)
+            escupir_tabla_ItTFilas(
+                it_tupla_imprimible=iterador6, 
+                titulo_tabla="Series Recomendadas (G)", 
+                tupla_de_columnas=("Id", "Nombre", "Grupo", "Peso"))
         case 99:
             print(despido)
             sys.exit(0)
