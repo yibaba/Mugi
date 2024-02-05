@@ -522,10 +522,44 @@ def iterador_CatPeso() -> Iterator[tuple[str, float]]:
                 votos: int = dict_cats["votes"]
                 yield (cat, votos*wht)
 
+def iterador_GenrPeso() -> Iterator[tuple[str, float]]:
+    for id, _, wht in iterador_tabla_IdNamePeso():
+        cadenajson = conseguir_cadena_json_capo(id=id)
+        for cadjson in cadenajson:
+            dict_serie = json.loads(cadjson)
+            for dict_genr in dict_serie["genres"]:
+                yield (dict_genr["genre"], wht)
+
+def tabla_CatPeso() -> list[tuple[str, float]]:
+    dict_cats: dict[str, float] = {}
+    for cat, wht in iterador_CatPeso():
+        if cat in dict_cats.keys():
+            dict_cats[cat] += wht
+        else:
+            dict_cats.setdefault(cat, wht)
+    lista_total: list[tuple[str, float]] = []
+    for cat in dict_cats.keys():
+        lista_total.append((cat, dict_cats[cat]))
+    return lista_total
+
+def tabla_GenrPeso() -> list[tuple[str, float]]:
+    dict_genr: dict[str, float] = {}
+    for genr, wht in iterador_GenrPeso():
+        if genr in dict_genr.keys():
+            dict_genr[genr] += wht
+        else:
+            dict_genr.setdefault(genr, wht)
+    lista_total: list[tuple[str, float]] = []
+    for genr in dict_genr.keys():
+        lista_total.append((genr, dict_genr[genr]))
+    return lista_total
+
 def iterador_cats_orden() -> Iterator[tuple[str, float]]:
     lista_ordenable: list[IdNamePeso] = []
-    for cat, wht in iterador_CatPeso():
+    for cat, wht in tabla_CatPeso():
         lista_ordenable.append((0, cat, wht))
+    for genr, wht in tabla_GenrPeso():
+        lista_ordenable.append((0, genr, wht))
     lista_ordenable = ordenar_listatuplas(lista_ordenable)
     for _, categoria, peso in lista_ordenable:
         yield (categoria, peso)
@@ -572,7 +606,6 @@ def opcion_recs_grupo(num: int) -> ItTFilas:
         yield (sid, nombre, nombre_grupo, peso)
 
 def opcion_top_cats(num: int) -> ItTFilas:
-    pass
     for nom, wht in itertools.islice(
         iterador_cats_orden(), 
         num):
@@ -608,7 +641,7 @@ def imprimir_opciones() -> None:
     print("\t4. Recomendador versión clásica")
     print("\t5. Id de serie a enlace")
     print("\t6. Recomendador versión grupos")
-    print("\tTODO. Imprimir categorías más usadas")
+    print("\t7. Imprimir categorías más usadas")
     print("\n\t99. Salir")
 
 def elegir_entre_opciones() -> None:
@@ -660,7 +693,6 @@ def elegir_entre_opciones() -> None:
                 titulo_tabla="Series Recomendadas (G)", 
                 tupla_de_columnas=("Id", "Nombre", "Grupo", "Peso"))
         case 7:
-            pass
             numero: int = int(input("Número de categorías: "))
             iterador7: ItTFilas = opcion_top_cats(num=numero)
             escupir_tabla_ItTFilas(
@@ -679,5 +711,5 @@ if __name__ == "__main__":
     #print(peticiones)
     elegir_entre_opciones()
     # monta tanto
-    # escribir_peticiones()
+    escribir_peticiones()
     sys.exit(0)
