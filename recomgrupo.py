@@ -13,7 +13,7 @@ import re
 from random import randint
 import itertools
 
-cooloff: float = 0.7
+cooloff: float = 0.9
 
 class tokenBearer:
     def __init__(self) -> None:
@@ -112,6 +112,7 @@ def cachear_peticion(peticion:requests.Response, url:str, caducidad:int=-1) -> N
     listado.stringjson = peticion.text
     if caducidad!=-1:
         listado.caducidad = caducidad
+        print(caducidad/3600)
     peticiones.append(listado)
     escribir_peticiones()
 
@@ -271,7 +272,7 @@ def iterador_tabla_IdNaRatLedTot() -> Iterator[IdNaRatLedTot]:
     for cadenajson in iterador_cadenajson_de_series_leyendo():
         yield cadenajson_lista_a_tabla_IdNaRatLedTot(cadenajson=cadenajson)
 
-def iterador_id_a_link(id: int) -> str:
+def fn_id_a_link(id: int) -> str:
     resultado: str = ""
     dict_serie = conseguir_cadena_json_capo(id=id)
     for cadjson in dict_serie:
@@ -348,7 +349,7 @@ def rellenar_grupos_de_id_si_necesario(id_serie: int) -> None:
             caducidad: int = randint(1,7)*((24*60*60) + randint(0,3600))
             cachear_peticion(peticion=peticion, url=url, caducidad=caducidad)
         else:
-            print("error petición series id")
+            print("error petición grupo series id")
             sys.exit(peticion.status_code)
 
 def rellenar_series_de_grupo_de_id_si_necesario(gid: int) -> None:
@@ -474,6 +475,7 @@ def iterador_recs_nativo() -> Iterator[IdNamePeso]:
         nombre, peso = dict_respuesta[sid]
         yield (sid, nombre, peso)
 
+# Churro, función fea y muy grande
 def iterador_recs_basado_gr(num: int) -> Iterator[tuple[int, str, str, float]]:
     bucleando: bool = True
     grupos_totales: list[IdNamePeso] = tabla_GidNP_recomendados()
@@ -510,6 +512,24 @@ def iterador_recs_basado_gr(num: int) -> Iterator[tuple[int, str, str, float]]:
         else:
             bucleando = False
 
+def iterador_CatPeso() -> Iterator[tuple[str, float]]:
+    for id, _, wht in iterador_tabla_IdNamePeso():
+        cadenajson = conseguir_cadena_json_capo(id=id)
+        for cadjson in cadenajson:
+            dict_serie = json.loads(cadjson)
+            for dict_cats in dict_serie["categories"]:
+                cat: str = dict_cats["category"]
+                votos: int = dict_cats["votes"]
+                yield (cat, votos*wht)
+
+def iterador_cats_orden() -> Iterator[tuple[str, float]]:
+    lista_ordenable: list[IdNamePeso] = []
+    for cat, wht in iterador_CatPeso():
+        lista_ordenable.append((0, cat, wht))
+    lista_ordenable = ordenar_listatuplas(lista_ordenable)
+    for _, categoria, peso in lista_ordenable:
+        yield (categoria, peso)
+
 ItTFilas: TypeAlias = Iterator[tuple[str, ...]]
 def opcion_top_grupos(num: int) -> ItTFilas:
     for id, nombre, peso in iterador_top_grupos(
@@ -540,7 +560,7 @@ def opcion_recs_clasico(num: int) -> ItTFilas:
 def opcion_id_a_url(id: int) -> ItTFilas:
     url_resultado: str = ""
     rid: str = str(id)
-    for caracter in iterador_id_a_link(id):
+    for caracter in fn_id_a_link(id):
         url_resultado += caracter
     yield (rid, url_resultado)
 
@@ -550,6 +570,14 @@ def opcion_recs_grupo(num: int) -> ItTFilas:
         sid: str = str(id)
         peso: str = str(wht)
         yield (sid, nombre, nombre_grupo, peso)
+
+def opcion_top_cats(num: int) -> ItTFilas:
+    pass
+    for nom, wht in itertools.islice(
+        iterador_cats_orden(), 
+        num):
+        peso: str = str(wht)
+        yield(nom, peso)
 
 def escupir_tabla_ItTFilas(
         it_tupla_imprimible: ItTFilas,
@@ -580,6 +608,7 @@ def imprimir_opciones() -> None:
     print("\t4. Recomendador versión clásica")
     print("\t5. Id de serie a enlace")
     print("\t6. Recomendador versión grupos")
+    print("\tTODO. Imprimir categorías más usadas")
     print("\n\t99. Salir")
 
 def elegir_entre_opciones() -> None:
@@ -624,13 +653,20 @@ def elegir_entre_opciones() -> None:
                 titulo_tabla="Resultado", 
                 tupla_de_columnas=("Id", "Url"))
         case 6:
-            pass
             numero: int = int(input("Número de recomendaciones: "))
             iterador6: ItTFilas = opcion_recs_grupo(num=numero)
             escupir_tabla_ItTFilas(
                 it_tupla_imprimible=iterador6, 
                 titulo_tabla="Series Recomendadas (G)", 
                 tupla_de_columnas=("Id", "Nombre", "Grupo", "Peso"))
+        case 7:
+            pass
+            numero: int = int(input("Número de categorías: "))
+            iterador7: ItTFilas = opcion_top_cats(num=numero)
+            escupir_tabla_ItTFilas(
+                it_tupla_imprimible=iterador7, 
+                titulo_tabla="Categorías en Uso", 
+                tupla_de_columnas=("Nombre", "Peso"))
         case 99:
             print(despido)
             sys.exit(0)
